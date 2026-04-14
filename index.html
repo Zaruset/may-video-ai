@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Верность • Серия 1 • ИИ-сериал</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            background: #000;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Segoe UI', system-ui, monospace;
+            padding: 10px;
+        }
+        .cinema {
+            position: relative;
+            max-width: 100%;
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+            background: #000;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            cursor: pointer;
+            background: #0a0f1a;
+        }
+        .timeline {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(12px);
+            border-radius: 40px;
+            padding: 6px 15px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-family: monospace;
+            font-weight: bold;
+            pointer-events: none;
+            border: 1px solid #ffd96655;
+        }
+        .time-text {
+            color: #ffd966;
+            font-size: 12px;
+            min-width: 80px;
+        }
+        .progress-bar-bg {
+            flex: 1;
+            height: 4px;
+            background: #2f3e4e;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            width: 0%;
+            height: 100%;
+            background: #ffaa33;
+            border-radius: 10px;
+            transition: width 0.1s linear;
+        }
+        .voice-badge {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(12px);
+            padding: 5px 12px;
+            border-radius: 40px;
+            color: #ffd966;
+            font-size: 10px;
+            font-weight: bold;
+            border-left: 3px solid gold;
+            pointer-events: none;
+        }
+        .episode-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(12px);
+            padding: 5px 12px;
+            border-radius: 40px;
+            color: #ffaa66;
+            font-size: 10px;
+            font-weight: bold;
+            pointer-events: none;
+        }
+        .click-hint {
+            position: absolute;
+            bottom: 55px;
+            right: 12px;
+            background: rgba(0,0,0,0.6);
+            border-radius: 30px;
+            padding: 4px 10px;
+            font-size: 9px;
+            color: #ccc;
+            pointer-events: none;
+        }
+        @media (min-width: 768px) {
+            .cinema { max-width: 800px; }
+            .voice-badge, .episode-badge { font-size: 12px; padding: 6px 16px; }
+            .time-text { font-size: 14px; }
+            .click-hint { font-size: 11px; }
+        }
+    </style>
+</head>
+<body>
+<div class="cinema">
+    <canvas id="seriesCanvas" width="800" height="500" style="width:100%; height:auto; aspect-ratio:800/500"></canvas>
+    <div class="timeline">
+        <div class="time-text" id="timeDisplay">00:00 / 08:30</div>
+        <div class="progress-bar-bg"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+    <div class="voice-badge">🎙️ АЛЕКС • озвучивай текст</div>
+    <div class="episode-badge">СЕРИЯ 1 • ИИ-КИНО</div>
+    <div class="click-hint">⏯ нажми — пауза</div>
+</div>
+
+<script>
+    (function(){
+        const canvas = document.getElementById('seriesCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Реальные пропорции
+        const W = 800, H = 500;
+        canvas.width = W;
+        canvas.height = H;
+        
+        let totalSeconds = 510;
+        let currentSeconds = 0;
+        let running = true;
+        let frameId;
+        
+        const timeDisplay = document.getElementById('timeDisplay');
+        const progressFill = document.getElementById('progressFill');
+        
+        // ========= ФОНЫ (ИИ-реалистичные) =========
+        // Используем качественные нейросетевые изображения
+        const backgrounds = {
+            park_night: "https://images.pexels.com/photos/1434575/night-city-street-lamp-1434575.jpg?auto=compress&cs=tinysrgb&w=800",
+            park_day: "https://images.pexels.com/photos/158028/bellingrath-gardens-park-alabama-nature-158028.jpeg?auto=compress&cs=tinysrgb&w=800",
+            bench: "https://images.pexels.com/photos/2387873/pexels-photo-2387873.jpeg?auto=compress&cs=tinysrgb&w=800",
+            porch: "https://images.pexels.com/photos/323705/pexels-photo-323705.jpeg?auto=compress&cs=tinysrgb&w=800",
+            alley: "https://images.pexels.com/photos/207171/pexels-photo-207171.jpeg?auto=compress&cs=tinysrgb&w=800"
+        };
+        
+        // Загруженные изображения
+        let loadedBgs = {};
+        let imagesLoaded = 0;
+        const totalImages = Object.keys(backgrounds).length;
+        
+        function loadImages(callback){
+            for(let key in backgrounds){
+                const img = new Image();
+                img.crossOrigin = "Anonymous";
+                img.src = backgrounds[key];
+                img.onload = () => {
+                    loadedBgs[key] = img;
+                    imagesLoaded++;
+                    if(imagesLoaded === totalImages) callback();
+                };
+                img.onerror = () => {
+                    loadedBgs[key] = null;
+                    imagesLoaded++;
+                    if(imagesLoaded === totalImages) callback();
+                };
+            }
+        }
+        
+        // ========= СЦЕНЫ =========
+        const scenes = [
+            { dur: 45, bg: "park_night", voice: "«Я шёл по парку поздно вечером. Услышал крики.»", drawExtra: (ctx) => drawAlexFigure(ctx, 200, 350) },
+            { dur: 50, bg: "park_night", voice: "«Трое пьяных приставали к девушке. Она кричала.»", drawExtra: (ctx) => { drawAlexFigure(ctx, 150, 350); drawVikaFigure(ctx, 500, 350); drawDrunkFigures(ctx); } },
+            { dur: 55, bg: "park_night", voice: "«Я не думал. Просто встал между ними. Получил по лицу.»", drawExtra: (ctx) => { drawAlexFight(ctx, 300, 350); drawDrunkFigures(ctx); } },
+            { dur: 50, bg: "park_night", voice: "«Девушка убежала. Пьяные отвлеклись на меня.»", drawExtra: (ctx) => { drawAlexAlone(ctx, 350, 350); } },
+            { dur: 60, bg: "alley", voice: "«Я остался один. Синяк под глазом. Но на душе было спокойно.»", drawExtra: (ctx) => drawAlexAlone(ctx, 400, 350) },
+            { dur: 55, bg: "park_day", voice: "«Через неделю я сидел на той же скамейке. Ко мне подошла она.»", drawExtra: (ctx) => { drawAlexFigure(ctx, 250, 380); drawVikaFigure(ctx, 550, 380); } },
+            { dur: 65, bg: "bench", voice: "«Ты спас мне жизнь. Меня зовут Вика. Спасибо». Я смотрел в её глаза и не мог отвести взгляд.»", drawExtra: (ctx) => { drawAlexFigure(ctx, 300, 370); drawVikaFigure(ctx, 500, 370); drawHeart(ctx, 400, 320); } },
+            { dur: 60, bg: "park_day", voice: "«Между нами пробежала искра. Я понял — это судьба.»", drawExtra: (ctx) => { drawAlexFigure(ctx, 280, 370); drawVikaFigure(ctx, 520, 370); drawSparks(ctx); } },
+            { dur: 70, bg: "porch", voice: "«Я провожал её до подъезда. Мы обнялись. Пора было прощаться.»", drawExtra: (ctx) => { drawAlexFigure(ctx, 300, 380); drawVikaFigure(ctx, 480, 380); } },
+            { dur: 65, bg: "porch", voice: "«Я остановил её: Знаешь, у меня никогда не было такой прекрасной девушки, как ты. Ты — блистатель океана мирового уровня на всей планете.»", drawExtra: (ctx) => { drawAlexFigure(ctx, 280, 380); drawVikaFigure(ctx, 520, 380); drawTextBubble(ctx, "Ты — море...", 280, 300); } },
+            { dur: 50, bg: "porch", voice: "«Вика покраснела. Поцеловала меня в щёку и убежала.»", drawExtra: (ctx) => { drawAlexFigure(ctx, 350, 380); drawVikaRunning(ctx, 600, 380); drawBlush(ctx, 520, 360); } },
+            { dur: 45, bg: "alley", voice: "«Я остался один. Серьёзный. Счастливый. И понял: это только начало.»", drawExtra: (ctx) => drawAlexSerious(ctx, 400, 370) }
+        ];
+        
+        let totalSceneDur = 0;
+        scenes.forEach(s => totalSceneDur += s.dur);
+        if(Math.abs(totalSceneDur - totalSeconds) > 10) totalSeconds = totalSceneDur;
+        
+        function getCurrentScene(sec){
+            let acc = 0;
+            for(let i = 0; i < scenes.length; i++){
+                if(sec >= acc && sec < acc + scenes[i].dur) return scenes[i];
+                acc += scenes[i].dur;
+            }
+            return scenes[scenes.length - 1];
+        }
+        
+        // ========= РИСОВАНИЕ ПЕРСОНАЖЕЙ (стилизованные, но поверх ИИ-фона) =========
+        function drawAlexFigure(ctx, x, y){
+            ctx.fillStyle = "#d4a373";
+            ctx.beginPath();
+            ctx.ellipse(x, y-20, 12, 18, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = "#2c3e50";
+            ctx.fillRect(x-12, y-5, 24, 35);
+            ctx.fillStyle = "#111";
+            ctx.fillRect(x-4, y-25, 3, 4);
+            ctx.fillRect(x+1, y-25, 3, 4);
+        }
+        
+        function drawVikaFigure(ctx, x, y){
+            ctx.fillStyle = "#e8c39e";
+            ctx.beginPath();
+            ctx.ellipse(x, y-20, 11, 16, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = "#c94f4f";
+            ctx.fillRect(x-10, y-5, 20, 35);
+            ctx.fillStyle = "#111";
+            ctx.fillRect(x-4, y-24, 3, 4);
+            ctx.fillRect(x+1, y-24, 3, 4);
+        }
+        
+        function drawDrunkFigures(ctx){
+            for(let i=0;i<3;i++){
+                ctx.fillStyle = "#5a3e2a";
+                ctx.beginPath();
+                ctx.ellipse(600 + i*40, 380, 10, 14, 0, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+        
+        function drawAlexFight(ctx, x, y){
+            drawAlexFigure(ctx, x, y);
+            ctx.fillStyle = "#aa4444";
+            ctx.beginPath();
+            ctx.arc(x-5, y-28, 5, 0, Math.PI*2);
+            ctx.fill();
+        }
+        
+        function drawAlexAlone(ctx, x, y){
+            drawAlexFigure(ctx, x, y);
+            ctx.fillStyle = "#aa4444";
+            ctx.beginPath();
+            ctx.arc(x-5, y-28, 5, 0, Math.PI*2);
+            ctx.fill();
+        }
+        
+        function drawAlexSerious(ctx, x, y){
+            drawAlexFigure(ctx, x, y);
+            ctx.fillStyle = "#333";
+            ctx.fillRect(x-3, y-18, 6, 2);
+        }
+        
+        function drawVikaRunning(ctx, x, y){
+            drawVikaFigure(ctx, x, y);
+            ctx.fillStyle = "#ffaa88";
+            ctx.fillRect(x+5, y-15, 15, 5);
+        }
+        
+        function drawHeart(ctx, x, y){
+            ctx.fillStyle = "#ff3366";
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.bezierCurveTo(x-10, y-10, x-20, y+5, x, y+15);
+            ctx.bezierCurveTo(x+20, y+5, x+10, y-10, x, y);
+            ctx.fill();
+        }
+        
+        function drawSparks(ctx){
+            for(let i=0;i<12;i++){
+                ctx.fillStyle = "#ffcc44";
+                ctx.beginPath();
+                ctx.arc(400 + (i-6)*8, 340, 2, 0, Math.PI*2);
+                ctx.fill();
+            }
+        }
+        
+        function drawTextBubble(ctx, text, x, y){
+            ctx.fillStyle = "#ffffffcc";
+            ctx.beginPath();
+            ctx.ellipse(x+30, y-40, 60, 20, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = "#000";
+            ctx.font = "10px monospace";
+            ctx.fillText(text, x-10, y-42);
+        }
+        
+        function drawBlush(ctx, x, y){
+            ctx.fillStyle = "#ff8888";
+            ctx.beginPath();
+            ctx.arc(x-8, y-28, 5, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(x+8, y-28, 5, 0, Math.PI*2);
+            ctx.fill();
+        }
+        
+        function drawVoice(ctx, text){
+            if(!text) return;
+            ctx.font = "bold 14px 'Segoe UI'";
+            ctx.fillStyle = "#FFFFFFf0";
+            ctx.shadowBlur = 4;
+            ctx.fillText(text, 20, H - 40);
+            ctx.shadowBlur = 0;
+        }
+        
+        let imagesReady = false;
+        loadImages(() => {
+            imagesReady = true;
+            animate();
+        });
+        
+        function animate(){
+            if(!running){
+                frameId = requestAnimationFrame(animate);
+                return;
+            }
+            if(!imagesReady){
+                ctx.fillStyle = "#0a0f1a";
+                ctx.fillRect(0,0,W,H);
+                ctx.fillStyle = "white";
+                ctx.font = "14px monospace";
+                ctx.fillText("Загрузка ИИ-фонов...", W/2-80, H/2);
+                frameId = requestAnimationFrame(animate);
+                return;
+            }
+            
+            currentSeconds += 1/30;
+            if(currentSeconds >= totalSeconds){
+                currentSeconds = totalSeconds;
+                running = false;
+            }
+            
+            let perc = (currentSeconds / totalSeconds) * 100;
+            progressFill.style.width = perc + "%";
+            let mins = Math.floor(currentSeconds / 60);
+            let secs = Math.floor(currentSeconds % 60);
+            let totalMins = Math.floor(totalSeconds / 60);
+            let totalSecsDisplay = Math.floor(totalSeconds % 60);
+            timeDisplay.innerText = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')} / ${totalMins.toString().padStart(2,'0')}:${totalSecsDisplay.toString().padStart(2,'0')}`;
+            
+            const scene = getCurrentScene(currentSeconds);
+            
+            // Отрисовка фона
+            const bgImg = loadedBgs[scene.bg];
+            if(bgImg){
+                ctx.drawImage(bgImg, 0, 0, W, H);
+            } else {
+                ctx.fillStyle = "#0a1f2e";
+                ctx.fillRect(0,0,W,H);
+            }
+            
+            // Отрисовка персонажей поверх
+            if(scene.drawExtra) scene.drawExtra(ctx);
+            
+            // Текст для озвучки
+            drawVoice(ctx, scene.voice);
+            
+            frameId = requestAnimationFrame(animate);
+        }
+        
+        canvas.addEventListener('click', () => {
+            running = !running;
+            if(!running) cancelAnimationFrame(frameId);
+            else animate();
+        });
+        
+        // Запускаем анимацию после загрузки
+        if(imagesReady) animate();
+    })();
+</script>
+</body>
+</html>
